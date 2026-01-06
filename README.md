@@ -22,8 +22,8 @@ A classic Pacman game implemented in Python with Pygame, featuring AI agents tha
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/pacman-ai.git
-   cd pacman-ai
+   git clone https://github.com/yourusername/pacman-ai-player.git
+   cd pacman-ai-player
    ```
 
 2. Install dependencies:
