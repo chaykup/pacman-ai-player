@@ -73,15 +73,16 @@ class AIAgent:
             if not goal_exists:
                 return True
         
-        # Replan when we reach a new node for responsiveness
+        # Check if we've moved to a new node
         current_key = self.get_node_key(current_node)
         if current_key != self.last_node:
             self.last_node = current_key
-            # Consume the first step of the path since we've moved
-            if len(self.current_path) > 0:
+            # We've reached a new node, consume the direction we just used
+            if len(self.current_path) > 1:
                 self.current_path.pop(0)
-            # Replan if path is now empty
-            if not self.current_path:
+            else:
+                # Path exhausted after this move - replan for next destination
+                self.current_path = []
                 return True
         
         return False
@@ -104,76 +105,84 @@ class AIAgent:
 
 
 class AStarAgent(AIAgent):
-    """AI Agent using A* Search - prioritizes AVOIDING GHOSTS.
+    """AI Agent using A* Search - SURVIVAL FOCUSED.
     
-    This agent focuses on survival by heavily penalizing paths near ghosts.
-    It will take longer routes to avoid danger.
+    This agent's #1 priority is avoiding ghosts at all costs.
+    It will only collect pellets when it's safe to do so.
     """
     
     def __init__(self, pacman, nodes, pellets, ghosts):
         super().__init__(pacman, nodes, pellets, ghosts)
         self.name = "A*"
+        self.last_position = None
     
     def heuristic(self, node, target_pos):
         """Calculate Manhattan distance heuristic."""
         return abs(node.position.x - target_pos.x) + abs(node.position.y - target_pos.y)
     
-    def ghost_penalty(self, node):
-        """Calculate heavy penalty for being near ghosts."""
-        penalty = 0
+    def get_ghost_danger(self, position):
+        """Calculate how dangerous a position is based on ghost proximity.
+        
+        Returns a high value if any ghost is nearby, 0 if safe.
+        """
+        danger = 0
         for ghost in self.ghosts:
-            if ghost.mode.current == FREIGHT:
-                # Bonus for going toward frightened ghosts
-                dist = (ghost.position - node.position).magnitudeSquared()
-                if dist < (6 * TILEWIDTH) ** 2:
-                    penalty -= 100
-            elif ghost.mode.current != SPAWN:
-                dist = (ghost.position - node.position).magnitudeSquared()
-                if dist < (3 * TILEWIDTH) ** 2:
-                    penalty += 1000  # Very heavy penalty - almost avoid at all costs
-                elif dist < (5 * TILEWIDTH) ** 2:
-                    penalty += 500
-                elif dist < (8 * TILEWIDTH) ** 2:
-                    penalty += 100
-        return penalty
+            # Only consider active ghosts (not respawning)
+            if ghost.mode.current == SPAWN:
+                continue
+            
+            dist_sq = (ghost.position - position).magnitudeSquared()
+            
+            # Extremely high danger when very close
+            if dist_sq < (2 * TILEWIDTH) ** 2:
+                danger += 100000
+            elif dist_sq < (4 * TILEWIDTH) ** 2:
+                danger += 50000
+            elif dist_sq < (6 * TILEWIDTH) ** 2:
+                danger += 10000
+            elif dist_sq < (8 * TILEWIDTH) ** 2:
+                danger += 1000
+            elif dist_sq < (10 * TILEWIDTH) ** 2:
+                danger += 100
+        
+        return danger
     
-    def select_goal(self):
-        """Select safest pellet to target."""
+    def find_safest_direction(self, current_node):
+        """Find the direction that moves Pacman away from all ghosts."""
+        best_direction = STOP
+        lowest_danger = float('inf')
+        
+        for neighbor, direction in self.get_neighbors(current_node):
+            danger = self.get_ghost_danger(neighbor.position)
+            if danger < lowest_danger:
+                lowest_danger = danger
+                best_direction = direction
+        
+        return best_direction, lowest_danger
+    
+    def select_safest_pellet(self):
+        """Select the pellet that is furthest from all ghosts."""
         if not self.pellets.pelletList:
             return None
         
-        pacman_pos = self.pacman.position
         best_pellet = None
-        best_score = float('inf')
+        lowest_danger = float('inf')
         
         for pellet in self.pellets.pelletList:
-            # Base score is distance
-            dist_sq = (pellet.position - pacman_pos).magnitudeSquared()
-            score = dist_sq
+            danger = self.get_ghost_danger(pellet.position)
             
-            # Heavy penalty for pellets near ghosts
-            for ghost in self.ghosts:
-                if ghost.mode.current != FREIGHT and ghost.mode.current != SPAWN:
-                    ghost_dist = (ghost.position - pellet.position).magnitudeSquared()
-                    if ghost_dist < (6 * TILEWIDTH) ** 2:
-                        score += 50000  # Avoid pellets near ghosts
+            # Also consider distance from Pacman (prefer closer safe pellets)
+            dist_to_pacman = (pellet.position - self.pacman.position).magnitudeSquared()
+            score = danger + (dist_to_pacman * 0.01)  # Small weight on distance
             
-            # Power pellets are valuable when threatened
-            if pellet.name == POWERPELLET:
-                for ghost in self.ghosts:
-                    if ghost.mode.current != FREIGHT and ghost.mode.current != SPAWN:
-                        ghost_dist = (ghost.position - pacman_pos).magnitudeSquared()
-                        if ghost_dist < (10 * TILEWIDTH) ** 2:
-                            score -= 100000  # Strongly prefer power pellets when threatened
-            
-            if score < best_score:
-                best_score = score
+            if score < lowest_danger:
+                lowest_danger = score
                 best_pellet = pellet
         
         return best_pellet
     
     def find_path(self, start_node, target_position):
-        """Find path using A* with ghost avoidance."""
+        """Find path using A* with ghost avoidance as the primary cost."""
         if start_node is None:
             return []
         
@@ -204,9 +213,10 @@ class AStarAgent(AIAgent):
                 if neighbor_key in visited:
                     continue
                 
+                # Cost is primarily ghost danger, with small movement cost
                 move_cost = TILEWIDTH
-                ghost_cost = self.ghost_penalty(neighbor)
-                new_g = g_scores[current_key] + move_cost + ghost_cost
+                ghost_danger = self.get_ghost_danger(neighbor.position)
+                new_g = g_scores[current_key] + move_cost + ghost_danger
                 
                 if neighbor_key not in g_scores or new_g < g_scores[neighbor_key]:
                     g_scores[neighbor_key] = new_g
@@ -219,133 +229,148 @@ class AStarAgent(AIAgent):
         return []
     
     def get_direction(self):
-        """Get next direction using A* with ghost avoidance."""
-        if not self.pellets.pelletList:
+        """Get next direction - ALWAYS prioritize ghost avoidance."""
+        current_node = self.get_current_node()
+        if current_node is None:
             return STOP
         
-        current_node = self.get_current_node()
+        # First, check if we're in immediate danger - always react immediately
+        current_danger = self.get_ghost_danger(self.pacman.position)
         
-        if self.should_replan(current_node):
-            target_pellet = self.select_goal()
-            if target_pellet is None:
-                return STOP
+        if current_danger >= 10000:
+            # In danger - find safest escape route immediately
+            safe_direction, _ = self.find_safest_direction(current_node)
+            self.current_path = []  # Clear path, we're in survival mode
+            self.last_position = None  # Force replan after escaping
+            if safe_direction != STOP:
+                return safe_direction
+        
+        # Get current position to detect movement
+        current_pos = (int(self.pacman.position.x), int(self.pacman.position.y))
+        
+        # Recalculate path when we reach a new position or have no path
+        if current_pos != self.last_position or not self.current_path:
+            self.last_position = current_pos
             
-            self.current_goal = (int(target_pellet.position.x), int(target_pellet.position.y))
-            self.current_path = self.find_path(current_node, target_pellet.position)
+            if not self.pellets.pelletList:
+                # No pellets left - just stay safe
+                safe_direction, _ = self.find_safest_direction(current_node)
+                return safe_direction
+            
+            target_pellet = self.select_safest_pellet()
+            if target_pellet:
+                self.current_path = self.find_path(current_node, target_pellet.position)
         
+        # Return next direction from path
         if self.current_path:
-            return self.current_path[0]
+            direction = self.current_path.pop(0)
+            
+            # Double-check this move is safe before committing
+            neighbor = current_node.neighbors.get(direction)
+            if neighbor:
+                next_danger = self.get_ghost_danger(neighbor.position)
+                if next_danger >= 10000:
+                    # This move leads to danger - escape instead
+                    safe_direction, _ = self.find_safest_direction(current_node)
+                    self.current_path = []
+                    return safe_direction
+            
+            return direction
         
-        return STOP
+        # Fallback - move to safest neighbor
+        safe_direction, _ = self.find_safest_direction(current_node)
+        return safe_direction
 
 
 class BFSAgent(AIAgent):
-    """AI Agent using BFS - prioritizes HIGHEST SCORE.
+    """AI Agent using BFS - SCORE FOCUSED.
     
-    This agent focuses on collecting pellets efficiently to maximize score.
-    It targets the highest-value pellets (power pellets > regular pellets)
-    and takes the shortest path to them.
+    This agent's only goal is to collect as many pellets as possible.
+    It completely ignores ghosts and always takes the shortest path
+    to the nearest pellet.
     """
     
     def __init__(self, pacman, nodes, pellets, ghosts):
         super().__init__(pacman, nodes, pellets, ghosts)
         self.name = "BFS"
-    
-    def select_goal(self):
-        """Select highest value pellet to target.
-        
-        Priority:
-        1. Power pellets (50 points) - always prefer these
-        2. Closest regular pellet (10 points)
-        """
-        if not self.pellets.pelletList:
-            return None
-        
-        pacman_pos = self.pacman.position
-        
-        # First, look for power pellets
-        best_power_pellet = None
-        best_power_dist = float('inf')
-        
-        # Also track closest regular pellet
-        best_regular_pellet = None
-        best_regular_dist = float('inf')
-        
-        for pellet in self.pellets.pelletList:
-            dist_sq = (pellet.position - pacman_pos).magnitudeSquared()
-            
-            if pellet.name == POWERPELLET:
-                if dist_sq < best_power_dist:
-                    best_power_dist = dist_sq
-                    best_power_pellet = pellet
-            else:
-                if dist_sq < best_regular_dist:
-                    best_regular_dist = dist_sq
-                    best_regular_pellet = pellet
-        
-        # Prefer power pellets unless a regular pellet is much closer
-        if best_power_pellet is not None:
-            # Only skip power pellet if regular is less than 1/4 the distance
-            if best_regular_pellet is None or best_regular_dist > best_power_dist * 0.25:
-                return best_power_pellet
-        
-        return best_regular_pellet if best_regular_pellet else best_power_pellet
+        self.last_position = None
     
     def find_path_to_nearest_pellet(self, start_node):
-        """Use BFS to find the shortest path to ANY pellet.
+        """Use BFS to find the shortest path to the nearest pellet.
         
-        Instead of pathfinding to a specific target, this searches outward
-        and returns the path to the first pellet encountered (shortest path).
+        BFS guarantees the shortest path. We expand outward from Pacman's
+        position and return immediately when we find any pellet.
         """
         if start_node is None:
             return []
         
         start_key = self.get_node_key(start_node)
         
-        # Check if there's a pellet at start position
-        for pellet in self.pellets.pelletList:
-            if self.is_at_goal(start_node, pellet.position):
-                return []  # Already at a pellet
-        
         queue = deque()
-        queue.append((start_node, []))
+        # Start by exploring all neighbors of the start node
+        for neighbor, direction in self.get_neighbors(start_node):
+            neighbor_key = self.get_node_key(neighbor)
+            # Check if this neighbor has a pellet
+            for pellet in self.pellets.pelletList:
+                if self.is_at_goal(neighbor, pellet.position):
+                    return [direction]  # One step to pellet
+            queue.append((neighbor, [direction], neighbor_key))
+        
         visited = {start_key}
         
         while queue:
-            current_node, path = queue.popleft()
+            current_node, path, current_key = queue.popleft()
             
-            # Check if there's a pellet at this node
-            for pellet in self.pellets.pelletList:
-                if self.is_at_goal(current_node, pellet.position):
-                    return path  # Found a pellet, return the path to it
+            if current_key in visited:
+                continue
+            visited.add(current_key)
             
             # Expand neighbors
             for neighbor, direction in self.get_neighbors(current_node):
                 neighbor_key = self.get_node_key(neighbor)
-                if neighbor_key not in visited:
-                    visited.add(neighbor_key)
-                    new_path = path + [direction]
-                    queue.append((neighbor, new_path))
+                if neighbor_key in visited:
+                    continue
+                
+                new_path = path + [direction]
+                
+                # Check if there's a pellet at this neighbor
+                for pellet in self.pellets.pelletList:
+                    if self.is_at_goal(neighbor, pellet.position):
+                        return new_path  # Found nearest pellet!
+                
+                queue.append((neighbor, new_path, neighbor_key))
         
         return []
     
     def get_direction(self):
-        """Get next direction using BFS to find nearest pellet."""
+        """Get next direction - always go straight for the nearest pellet.
+        
+        Simple approach: recalculate path every time we're at a new node position.
+        This is efficient for BFS and ensures we always have the optimal path.
+        """
         if not self.pellets.pelletList:
             return STOP
         
         current_node = self.get_current_node()
+        if current_node is None:
+            return STOP
         
-        if self.should_replan(current_node):
-            # BFS to find shortest path to any pellet
+        # Get current position to detect when we've moved
+        current_pos = (int(self.pacman.position.x), int(self.pacman.position.y))
+        
+        # Recalculate path when we reach a new position or have no path
+        if current_pos != self.last_position or not self.current_path:
+            self.last_position = current_pos
             self.current_path = self.find_path_to_nearest_pellet(current_node)
-            
-            if self.current_path:
-                # Set current goal for replan tracking (approximate)
-                self.current_goal = None  # We don't target a specific pellet
         
+        # Return the first direction in our path
         if self.current_path:
-            return self.current_path[0]
+            direction = self.current_path.pop(0)
+            return direction
+        
+        # Fallback: if no path found, move in any valid direction
+        for neighbor, direction in self.get_neighbors(current_node):
+            return direction
         
         return STOP
 
