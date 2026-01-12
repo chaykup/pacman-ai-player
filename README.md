@@ -15,8 +15,9 @@ A classic Pacman game implemented in Python with Pygame, featuring AI agents tha
 
 ## Requirements
 
-- Python 3.7 or higher
-- Pygame
+- Python>=3.7
+- Pygame>=2.6
+- Numpy>=2.2
 
 ## Installation
 
@@ -28,7 +29,7 @@ A classic Pacman game implemented in Python with Pygame, featuring AI agents tha
 
 2. Install dependencies:
    ```bash
-   pip install pygame
+   pip install -r requirements.txt
    ```
 
 ## How to Run
