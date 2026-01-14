@@ -11,7 +11,7 @@ from text import TextGroup
 from sprites import LifeSprites
 from sprites import MazeSprites
 from mazedata import MazeData
-from ai_agent import create_agent, AStarAgent, BFSAgent
+from ai_agent import create_agent, AStarAgent, BFSAgent, DFSAgent
 
 
 class Button:
@@ -84,10 +84,10 @@ class GameController(object):
 
     def setup_buttons(self):
         """Create the AI selection buttons."""
-        button_width = 120
+        button_width = 80
         button_height = 35
-        button_spacing = 20
-        total_width = 3 * button_width + 2 * button_spacing
+        button_spacing = 10
+        total_width = 4 * button_width + 3 * button_spacing
         start_x = (SCREENWIDTH - total_width) // 2
         # Position buttons lower in the panel to leave room for mode text
         button_y = GAME_HEIGHT + 28
@@ -115,7 +115,13 @@ class GameController(object):
             "BFS", base_color, hover_color, YELLOW
         )
         
-        self.buttons = [self.player_button, self.astar_button, self.bfs_button]
+        # DFS Button - Green theme
+        self.dfs_button = Button(
+            start_x + 3 * (button_width + button_spacing), button_y, button_width, button_height,
+            "DFS", base_color, hover_color, GREEN
+        )
+        
+        self.buttons = [self.player_button, self.astar_button, self.bfs_button, self.dfs_button]
 
     def setBackground(self):
         self.background_norm = pygame.surface.Surface(SCREENSIZE).convert()
@@ -149,6 +155,10 @@ class GameController(object):
         self.ghosts.inky.startNode.denyAccess(RIGHT, self.ghosts.inky)
         self.ghosts.clyde.startNode.denyAccess(LEFT, self.ghosts.clyde)
         self.mazedata.obj.denyGhostsAccess(self.ghosts, self.nodes)
+        
+        # Reduce pellets to one if in DFS mode
+        if self.ai_mode == AI_DFS:
+            self.pellets.reduce_to_one_pellet()
         
         # Update AI agent with new game objects
         self.update_ai_agent()
@@ -200,12 +210,23 @@ class GameController(object):
 
     def set_ai_mode(self, mode):
         """Set the AI mode and update button states."""
+        old_mode = self.ai_mode
         self.ai_mode = mode
         
         # Update button selection states
         self.player_button.is_selected = (mode == AI_NONE)
         self.astar_button.is_selected = (mode == AI_ASTAR)
         self.bfs_button.is_selected = (mode == AI_BFS)
+        self.dfs_button.is_selected = (mode == AI_DFS)
+        
+        # Handle pellet reduction/restoration for DFS mode
+        if hasattr(self, 'pellets'):
+            if mode == AI_DFS and old_mode != AI_DFS:
+                # Switching to DFS mode - reduce pellets to one
+                self.pellets.reduce_to_one_pellet()
+            elif old_mode == AI_DFS and mode != AI_DFS:
+                # Switching away from DFS mode - restore original pellets
+                self.pellets.restore_original_pellets()
         
         # Update pacman control mode
         if hasattr(self, 'pacman'):
@@ -271,6 +292,8 @@ class GameController(object):
                         self.set_ai_mode(AI_ASTAR)
                     elif self.bfs_button.check_click(mouse_pos):
                         self.set_ai_mode(AI_BFS)
+                    elif self.dfs_button.check_click(mouse_pos):
+                        self.set_ai_mode(AI_DFS)
             elif event.type == KEYDOWN:
                 if event.key == K_SPACE:
                     if self.pacman.alive:
@@ -425,6 +448,8 @@ class GameController(object):
             mode_text = "A*: Avoids ghosts, survives longer"
         elif self.ai_mode == AI_BFS:
             mode_text = "BFS: Prioritizes highest score"
+        elif self.ai_mode == AI_DFS:
+            mode_text = "DFS: Depth-first search strategy"
         else:
             mode_text = ""
         

@@ -1,8 +1,9 @@
 """
 AI Agent module for Pacman game.
-Implements two AI strategies:
+Implements three AI strategies:
 - A*: Prioritizes avoiding ghosts while collecting pellets (survival focused)
 - BFS: Prioritizes getting the highest score (greedy pellet collection)
+- DFS: Finds shortest path to single pellet (board contains only one pellet)
 """
 
 from collections import deque
@@ -375,10 +376,102 @@ class BFSAgent(AIAgent):
         return STOP
 
 
+class DFSAgent(AIAgent):
+    """AI Agent using DFS mode - finds shortest path to single pellet.
+    
+    In DFS mode, the board contains only one pellet.
+    This agent finds the shortest path to that pellet using BFS
+    (which guarantees shortest path).
+    """
+    
+    def __init__(self, pacman, nodes, pellets, ghosts):
+        super().__init__(pacman, nodes, pellets, ghosts)
+        self.name = "DFS"
+        self.last_position = None
+    
+    def find_shortest_path_to_pellet(self, start_node):
+        """Use BFS to find the shortest path to the single pellet.
+        
+        Since DFS mode has only one pellet, we use BFS to guarantee
+        the shortest path to it.
+        """
+        if start_node is None:
+            return []
+        
+        if not self.pellets.pelletList:
+            return []
+        
+        # Get the single pellet
+        target_pellet = self.pellets.pelletList[0]
+        target_position = target_pellet.position
+        
+        start_key = self.get_node_key(start_node)
+        
+        # Check if we're already at the goal
+        if self.is_at_goal(start_node, target_position):
+            return []
+        
+        queue = deque()
+        queue.append((start_node, [], start_key))
+        visited = set()
+        
+        while queue:
+            current_node, path, current_key = queue.popleft()
+            
+            if current_key in visited:
+                continue
+            visited.add(current_key)
+            
+            # Check if we've reached the target
+            if self.is_at_goal(current_node, target_position):
+                return path
+            
+            # Expand neighbors
+            for neighbor, direction in self.get_neighbors(current_node):
+                neighbor_key = self.get_node_key(neighbor)
+                if neighbor_key in visited:
+                    continue
+                
+                new_path = path + [direction]
+                queue.append((neighbor, new_path, neighbor_key))
+        
+        return []
+    
+    def get_direction(self):
+        """Get next direction - find shortest path to the single pellet."""
+        if not self.pellets.pelletList:
+            return STOP
+        
+        current_node = self.get_current_node()
+        if current_node is None:
+            return STOP
+        
+        # Get current position to detect when we've moved
+        current_pos = (int(self.pacman.position.x), int(self.pacman.position.y))
+        
+        # Recalculate path when we reach a new position or have no path
+        if current_pos != self.last_position or not self.current_path:
+            self.last_position = current_pos
+            self.current_path = self.find_shortest_path_to_pellet(current_node)
+        
+        # Return the first direction in our path
+        if self.current_path:
+            direction = self.current_path.pop(0)
+            return direction
+        
+        # Fallback: if no path found, move in any valid direction
+        for neighbor, direction in self.get_neighbors(current_node):
+            return direction
+        
+        return STOP
+
+
 def create_agent(ai_mode, pacman, nodes, pellets, ghosts):
     """Factory function to create the appropriate AI agent."""
     if ai_mode == AI_ASTAR:
         return AStarAgent(pacman, nodes, pellets, ghosts)
     elif ai_mode == AI_BFS:
         return BFSAgent(pacman, nodes, pellets, ghosts)
+    elif ai_mode == AI_DFS:
+        return DFSAgent(pacman, nodes, pellets, ghosts)
     return None
