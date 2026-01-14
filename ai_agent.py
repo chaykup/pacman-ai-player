@@ -377,11 +377,11 @@ class BFSAgent(AIAgent):
 
 
 class DFSAgent(AIAgent):
-    """AI Agent using DFS mode - finds shortest path to single pellet.
+    """AI Agent using DFS mode - finds any path to single pellet using Depth-First Search.
     
     In DFS mode, the board contains only one pellet.
-    This agent finds the shortest path to that pellet using BFS
-    (which guarantees shortest path).
+    This agent uses Depth-First Search to find a path to that pellet.
+    The path may not be the shortest, but it will eventually reach the pellet.
     """
     
     def __init__(self, pacman, nodes, pellets, ghosts):
@@ -389,11 +389,12 @@ class DFSAgent(AIAgent):
         self.name = "DFS"
         self.last_position = None
     
-    def find_shortest_path_to_pellet(self, start_node):
-        """Use BFS to find the shortest path to the single pellet.
+    def find_path_to_pellet(self, start_node):
+        """Use DFS (Depth-First Search) to find a path to the single pellet.
         
-        Since DFS mode has only one pellet, we use BFS to guarantee
-        the shortest path to it.
+        DFS uses a stack (LIFO) instead of a queue, so it explores
+        deeply before backtracking. This may not find the shortest path,
+        but it will find a valid path to the pellet.
         """
         if start_node is None:
             return []
@@ -411,12 +412,13 @@ class DFSAgent(AIAgent):
         if self.is_at_goal(start_node, target_position):
             return []
         
-        queue = deque()
-        queue.append((start_node, [], start_key))
+        # Use a list as a stack (append/pop for LIFO behavior)
+        stack = []
+        stack.append((start_node, [], start_key))
         visited = set()
         
-        while queue:
-            current_node, path, current_key = queue.popleft()
+        while stack:
+            current_node, path, current_key = stack.pop()  # Pop from end (LIFO)
             
             if current_key in visited:
                 continue
@@ -426,19 +428,21 @@ class DFSAgent(AIAgent):
             if self.is_at_goal(current_node, target_position):
                 return path
             
-            # Expand neighbors
-            for neighbor, direction in self.get_neighbors(current_node):
+            # Expand neighbors (add to stack in reverse order to maintain direction preference)
+            neighbors = self.get_neighbors(current_node)
+            # Reverse to maintain consistent exploration order
+            for neighbor, direction in reversed(neighbors):
                 neighbor_key = self.get_node_key(neighbor)
                 if neighbor_key in visited:
                     continue
                 
                 new_path = path + [direction]
-                queue.append((neighbor, new_path, neighbor_key))
+                stack.append((neighbor, new_path, neighbor_key))
         
         return []
     
     def get_direction(self):
-        """Get next direction - find shortest path to the single pellet."""
+        """Get next direction - find path to the single pellet using DFS."""
         if not self.pellets.pelletList:
             return STOP
         
@@ -452,7 +456,7 @@ class DFSAgent(AIAgent):
         # Recalculate path when we reach a new position or have no path
         if current_pos != self.last_position or not self.current_path:
             self.last_position = current_pos
-            self.current_path = self.find_shortest_path_to_pellet(current_node)
+            self.current_path = self.find_path_to_pellet(current_node)
         
         # Return the first direction in our path
         if self.current_path:
